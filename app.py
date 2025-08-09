@@ -203,7 +203,7 @@ for (usuario, semana), g in tabla_f.groupby(["Usuario","Semana"]):
     g2["Total horas"] = g2["Dur_td"].apply(td_to_hhmmss)
     g2 = g2[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Inicio_dt","Hora inicio","Hora fin","Total horas","Dur_td"]]
     g2 = g2.sort_values(["Fecha","Hora inicio"])
-    tabla_final_f.append(g2.drop(columns=["Inicio_dt"]))
+    tabla_final_f.append(g2.drop(columns=["Inicio_dt","Dur_td"]))
     total_seconds = int(g2["Dur_td"].dropna().dt.total_seconds().sum())
     subtotal = td_to_hhmmss(pd.Timedelta(seconds=total_seconds))
     tabla_final_f.append(pd.DataFrame({
