@@ -213,8 +213,11 @@ for (usuario, semana), g in tabla_f.groupby(["Usuario","Semana"]):
     }))
 tabla_final_f = pd.concat(tabla_final_f, ignore_index=True) if tabla_final_f else pd.DataFrame()
 
-tabla_final_f['Nombre'] = tabla_final_f['Nombre'].str.upper()
-tabla_final_f['Apellidos'] = tabla_final_f['Apellidos'].str.upper()
+# Solo aplicar transformaciones si el DataFrame no está vacío y tiene las columnas necesarias
+if not tabla_final_f.empty and 'Nombre' in tabla_final_f.columns:
+    tabla_final_f['Nombre'] = tabla_final_f['Nombre'].str.upper()
+if not tabla_final_f.empty and 'Apellidos' in tabla_final_f.columns:
+    tabla_final_f['Apellidos'] = tabla_final_f['Apellidos'].str.upper()
 
 # Totales filtrados
 tmp_f = tabla_f.dropna(subset=["Dur_td"]).copy()
