@@ -7,6 +7,7 @@ import plotly.express as px
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode  # streamlit-aggrid
 from streamlit_extras.stylable_container import stylable_container  # streamlit-extras
+from geopy.distance import geodesic  # Para calcular distancias geográficas
 
 # ---------------------------- Config & Estilo ----------------------------
 st.set_page_config(page_title="Control de Horas", layout="wide")
@@ -60,6 +61,20 @@ def to_excel_bytes(dfs: dict[str, pd.DataFrame]) -> bytes:
     buf.seek(0)
     return buf.read()
 
+def calcular_distancia_geografica(lat1, lon1, lat2, lon2):
+    """Calcula la distancia en metros entre dos puntos geográficos."""
+    try:
+        if pd.isna(lat1) or pd.isna(lon1) or pd.isna(lat2) or pd.isna(lon2):
+            return None
+        if lat1 == 0 and lon1 == 0 and lat2 == 0 and lon2 == 0:
+            return None
+        punto1 = (lat1, lon1)
+        punto2 = (lat2, lon2)
+        distancia = geodesic(punto1, punto2).meters
+        return round(distancia, 2)
+    except:
+        return None
+
 def build_outputs(df_raw: pd.DataFrame):
     # Map robusto de columnas
     cols_map = {c.strip().lower(): c for c in df_raw.columns}
@@ -73,6 +88,13 @@ def build_outputs(df_raw: pd.DataFrame):
         cols_map["usuario"], cols_map["nombre"], cols_map["apellidos"],
         cols_map["inicio"], cols_map["fin"]
     )
+    
+    # Columnas de geolocalización (opcionales)
+    geo_cols = {}
+    geo_keys = ["latitud", "longitud", "latitud fin", "longitud fin"]
+    for key in geo_keys:
+        if key in cols_map:
+            geo_cols[key] = cols_map[key]
 
     df = df_raw.copy()
     df["Inicio_dt"] = parse_dt(df[ci])
@@ -89,6 +111,17 @@ def build_outputs(df_raw: pd.DataFrame):
     # Duración
     df["Dur_td"] = df["Fin_dt"] - df["Inicio_dt"]
     df["Total horas"] = df["Dur_td"].apply(td_to_hhmmss)
+    
+    # Distancia geográfica (si están disponibles las columnas)
+    if len(geo_cols) == 4:
+        df["Distancia (m)"] = df.apply(
+            lambda row: calcular_distancia_geografica(
+                row[geo_cols["latitud"]], row[geo_cols["longitud"]],
+                row[geo_cols["latitud fin"]], row[geo_cols["longitud fin"]]
+            ), axis=1
+        )
+    else:
+        df["Distancia (m)"] = None
 
     # Semana ISO y Mes/Año
     iso = df["Inicio_dt"].dt.isocalendar()
@@ -97,7 +130,8 @@ def build_outputs(df_raw: pd.DataFrame):
     df["Mes"] = df["Inicio_dt"].dt.to_period("M").astype(str)
 
     # Orden
-    tabla = df[["Semana","Año","Mes","Fecha",cu,cn,ca,"Hora inicio","Hora fin","Total horas","Dur_td","Inicio_dt"]].copy()
+    columnas_tabla = ["Semana","Año","Mes","Fecha",cu,cn,ca,"Hora inicio","Hora fin","Total horas","Distancia (m)","Dur_td","Inicio_dt"]
+    tabla = df[columnas_tabla].copy()
     tabla = tabla.sort_values(by=[cu,"Semana","Fecha","Hora inicio"]).reset_index(drop=True)
 
     # Subtotales (Usuario, Semana)
@@ -110,7 +144,8 @@ def build_outputs(df_raw: pd.DataFrame):
         bloques.append(pd.DataFrame({
             "Semana":[semana], "Año":[""], "Mes":[""], "Fecha":[""],
             cu:[f"Subtotal {usuario}"], cn:[""], ca:[""],
-            "Hora inicio":[""], "Hora fin":[""], "Total horas":[subtotal]
+            "Hora inicio":[""], "Hora fin":[""], "Total horas":[subtotal],
+            "Distancia (m)":[""] 
         }))
     tabla_final = pd.concat(bloques, ignore_index=True)
 
@@ -201,7 +236,7 @@ tabla_final_f = []
 for (usuario, semana), g in tabla_f.groupby(["Usuario","Semana"]):
     g2 = g.copy()
     g2["Total horas"] = g2["Dur_td"].apply(td_to_hhmmss)
-    g2 = g2[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Inicio_dt","Hora inicio","Hora fin","Total horas","Dur_td"]]
+    g2 = g2[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Inicio_dt","Hora inicio","Hora fin","Total horas","Distancia (m)","Dur_td"]]
     g2 = g2.sort_values(["Fecha","Hora inicio"])
     tabla_final_f.append(g2.drop(columns=["Inicio_dt","Dur_td"]))
     total_seconds = int(g2["Dur_td"].dropna().dt.total_seconds().sum())
@@ -209,7 +244,8 @@ for (usuario, semana), g in tabla_f.groupby(["Usuario","Semana"]):
     tabla_final_f.append(pd.DataFrame({
         "Semana":[semana], "Año":[""], "Mes":[""], "Fecha":[""],
         "Usuario":[f"Subtotal {usuario}"], "Nombre":[""], "Apellidos":[""],
-        "Hora inicio":[""], "Hora fin":[""], "Total horas":[subtotal]
+        "Hora inicio":[""], "Hora fin":[""], "Total horas":[subtotal],
+        "Distancia (m)":[""] 
     }))
 tabla_final_f = pd.concat(tabla_final_f, ignore_index=True) if tabla_final_f else pd.DataFrame()
 
@@ -414,7 +450,7 @@ with col_d2:
                 if g.empty:
                     continue
                 g["Total horas"] = g["Dur_td"].apply(td_to_hhmmss)
-                g_out = g[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Hora inicio","Hora fin","Total horas"]]
+                g_out = g[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Hora inicio","Hora fin","Total horas","Distancia (m)"]]
                 # subtotales por semana
                 subt_list = []
                 for semana, sg in g.groupby("Semana"):
