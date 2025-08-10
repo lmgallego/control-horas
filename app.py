@@ -112,14 +112,17 @@ def build_outputs(df_raw: pd.DataFrame):
     df["Dur_td"] = df["Fin_dt"] - df["Inicio_dt"]
     df["Total horas"] = df["Dur_td"].apply(td_to_hhmmss)
     
-    # Distancia geográfica (si están disponibles las columnas)
+    # Distancia geográfica (si están disponibles las columnas y no hay 'Sin registro')
     if len(geo_cols) == 4:
-        df["Distancia (m)"] = df.apply(
-            lambda row: calcular_distancia_geografica(
+        def calcular_distancia_con_validacion(row):
+            # No calcular distancia si hay 'Sin registro'
+            if pd.isna(row["Fin_dt"]) or row["Hora fin"] == "Sin registro":
+                return None
+            return calcular_distancia_geografica(
                 row[geo_cols["latitud"]], row[geo_cols["longitud"]],
                 row[geo_cols["latitud fin"]], row[geo_cols["longitud fin"]]
-            ), axis=1
-        )
+            )
+        df["Distancia (m)"] = df.apply(calcular_distancia_con_validacion, axis=1)
     else:
         df["Distancia (m)"] = None
 
@@ -145,7 +148,7 @@ def build_outputs(df_raw: pd.DataFrame):
             "Semana":[semana], "Año":[""], "Mes":[""], "Fecha":[""],
             cu:[f"Subtotal {usuario}"], cn:[""], ca:[""],
             "Hora inicio":[""], "Hora fin":[""], "Total horas":[subtotal],
-            "Distancia (m)":[""] 
+            "Distancia (m)":[None] 
         }))
     tabla_final = pd.concat(bloques, ignore_index=True)
 
@@ -245,7 +248,7 @@ for (usuario, semana), g in tabla_f.groupby(["Usuario","Semana"]):
         "Semana":[semana], "Año":[""], "Mes":[""], "Fecha":[""],
         "Usuario":[f"Subtotal {usuario}"], "Nombre":[""], "Apellidos":[""],
         "Hora inicio":[""], "Hora fin":[""], "Total horas":[subtotal],
-        "Distancia (m)":[""] 
+        "Distancia (m)":[None] 
     }))
 tabla_final_f = pd.concat(tabla_final_f, ignore_index=True) if tabla_final_f else pd.DataFrame()
 
