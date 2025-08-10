@@ -112,6 +112,27 @@ def build_outputs(df_raw: pd.DataFrame):
     df["Dur_td"] = df["Fin_dt"] - df["Inicio_dt"]
     df["Total horas"] = df["Dur_td"].apply(td_to_hhmmss)
     
+    # Función para generar enlaces de Google Maps
+    def generar_enlace_maps(lat, lon):
+        if pd.isna(lat) or pd.isna(lon) or lat == 0 or lon == 0:
+            return None
+        return f"https://www.google.com/maps?q={lat},{lon}"
+    
+    # Enlaces de Google Maps para ubicaciones de inicio y fin
+    if len(geo_cols) >= 2:
+        df["Mapa Inicio"] = df.apply(lambda row: generar_enlace_maps(
+            row[geo_cols["latitud"]], row[geo_cols["longitud"]]
+        ), axis=1)
+    else:
+        df["Mapa Inicio"] = None
+        
+    if len(geo_cols) == 4:
+        df["Mapa Fin"] = df.apply(lambda row: generar_enlace_maps(
+            row[geo_cols["latitud fin"]], row[geo_cols["longitud fin"]]
+        ), axis=1)
+    else:
+        df["Mapa Fin"] = None
+    
     # Distancia geográfica (si están disponibles las columnas y no hay 'Sin registro')
     if len(geo_cols) == 4:
         def calcular_distancia_con_validacion(row):
@@ -133,7 +154,7 @@ def build_outputs(df_raw: pd.DataFrame):
     df["Mes"] = df["Inicio_dt"].dt.to_period("M").astype(str)
 
     # Orden
-    columnas_tabla = ["Semana","Año","Mes","Fecha",cu,cn,ca,"Hora inicio","Hora fin","Total horas","Distancia (m)","Dur_td","Inicio_dt"]
+    columnas_tabla = ["Semana","Año","Mes","Fecha",cu,cn,ca,"Hora inicio","Hora fin","Total horas","Distancia (m)","Mapa Inicio","Mapa Fin","Dur_td","Inicio_dt"]
     tabla = df[columnas_tabla].copy()
     tabla = tabla.sort_values(by=[cu,"Semana","Fecha","Hora inicio"]).reset_index(drop=True)
 
@@ -148,7 +169,7 @@ def build_outputs(df_raw: pd.DataFrame):
             "Semana":[semana], "Año":[""], "Mes":[""], "Fecha":[""],
             cu:[f"Subtotal {usuario}"], cn:[""], ca:[""],
             "Hora inicio":[""], "Hora fin":[""], "Total horas":[subtotal],
-            "Distancia (m)":[None] 
+            "Distancia (m)":[None], "Mapa Inicio":[None], "Mapa Fin":[None]
         }))
     tabla_final = pd.concat(bloques, ignore_index=True)
 
@@ -177,12 +198,40 @@ def build_outputs(df_raw: pd.DataFrame):
     return tabla, tabla_final, totales_semana, totales_mes
 
 def aggrid(df, height=420, bold_subtotals=False):
+    # Crear una copia del DataFrame para mostrar enlaces como HTML
+    df_display = df.copy()
+    
+    # Mantener las URLs originales para el cellRenderer
+    # No modificamos las columnas aquí, el cellRenderer manejará la visualización
+    
     # Configurar la tabla
-    gob = GridOptionsBuilder.from_dataframe(df)
+    gob = GridOptionsBuilder.from_dataframe(df_display)
     gob.configure_default_column(resizable=True, filter=True, sortable=True)
     
+    # Configurar columnas de mapas con cellRenderer personalizado
+    cellRenderer_maps = JsCode("""
+    class LinkRenderer {
+        init(params) {
+            this.eGui = document.createElement('div');
+            if (params.value && params.value !== '') {
+                this.eGui.innerHTML = '<a href="' + params.value + '" target="_blank" style="color: #0D6EFD; text-decoration: underline; cursor: pointer;">📍 Ver mapa</a>';
+            } else {
+                this.eGui.innerHTML = '';
+            }
+        }
+        getGui() {
+            return this.eGui;
+        }
+    }
+    """)
+    
+    if 'Mapa Inicio' in df_display.columns:
+        gob.configure_column('Mapa Inicio', width=150, cellRenderer=cellRenderer_maps)
+    if 'Mapa Fin' in df_display.columns:
+        gob.configure_column('Mapa Fin', width=150, cellRenderer=cellRenderer_maps)
+    
     # Si necesitamos resaltar subtotales, aplicamos CSS personalizado
-    if bold_subtotals and 'Usuario' in df.columns:
+    if bold_subtotals and 'Usuario' in df_display.columns:
         # Agregar CSS personalizado para filas de subtotal
         st.markdown("""
         <style>
@@ -201,8 +250,8 @@ def aggrid(df, height=420, bold_subtotals=False):
     gob.configure_grid_options(domLayout='normal')
     grid_options = gob.build()
     
-    # Mostrar la tabla
-    AgGrid(df, gridOptions=grid_options, height=height, theme="streamlit")
+    # Mostrar la tabla con HTML habilitado
+    AgGrid(df_display, gridOptions=grid_options, height=height, theme="streamlit", allow_unsafe_jscode=True, enable_enterprise_modules=False)
 
 # ---------------------------- Flujo principal ----------------------------
 if uploaded is None:
@@ -239,7 +288,7 @@ tabla_final_f = []
 for (usuario, semana), g in tabla_f.groupby(["Usuario","Semana"]):
     g2 = g.copy()
     g2["Total horas"] = g2["Dur_td"].apply(td_to_hhmmss)
-    g2 = g2[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Inicio_dt","Hora inicio","Hora fin","Total horas","Distancia (m)","Dur_td"]]
+    g2 = g2[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Inicio_dt","Hora inicio","Hora fin","Total horas","Distancia (m)","Mapa Inicio","Mapa Fin","Dur_td"]]
     g2 = g2.sort_values(["Fecha","Hora inicio"])
     tabla_final_f.append(g2.drop(columns=["Inicio_dt","Dur_td"]))
     total_seconds = int(g2["Dur_td"].dropna().dt.total_seconds().sum())
@@ -248,7 +297,7 @@ for (usuario, semana), g in tabla_f.groupby(["Usuario","Semana"]):
         "Semana":[semana], "Año":[""], "Mes":[""], "Fecha":[""],
         "Usuario":[f"Subtotal {usuario}"], "Nombre":[""], "Apellidos":[""],
         "Hora inicio":[""], "Hora fin":[""], "Total horas":[subtotal],
-        "Distancia (m)":[None] 
+        "Distancia (m)":[None], "Mapa Inicio":[None], "Mapa Fin":[None]
     }))
 tabla_final_f = pd.concat(tabla_final_f, ignore_index=True) if tabla_final_f else pd.DataFrame()
 
@@ -453,7 +502,7 @@ with col_d2:
                 if g.empty:
                     continue
                 g["Total horas"] = g["Dur_td"].apply(td_to_hhmmss)
-                g_out = g[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Hora inicio","Hora fin","Total horas","Distancia (m)"]]
+                g_out = g[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Hora inicio","Hora fin","Total horas","Distancia (m)","Mapa Inicio","Mapa Fin"]]
                 # subtotales por semana
                 subt_list = []
                 for semana, sg in g.groupby("Semana"):
