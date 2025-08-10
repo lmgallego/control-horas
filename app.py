@@ -56,8 +56,60 @@ def td_to_hhmmss(td):
 def to_excel_bytes(dfs: dict[str, pd.DataFrame]) -> bytes:
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        workbook = writer.book
+        
         for sheet, df in dfs.items():
-            df.to_excel(writer, index=False, sheet_name=sheet[:31])
+            # Crear una copia del DataFrame para Excel
+            df_excel = df.copy()
+            
+            # Guardar las URLs originales antes de modificar
+            urls_inicio = {}
+            urls_fin = {}
+            
+            if 'Mapa Inicio' in df_excel.columns:
+                for idx, url in enumerate(df_excel['Mapa Inicio']):
+                    if pd.notna(url) and url != '':
+                        urls_inicio[idx] = url
+                df_excel['Mapa Inicio'] = df_excel['Mapa Inicio'].apply(
+                    lambda x: '🗺️ Ver ubicación' if pd.notna(x) and x != '' else x
+                )
+            
+            if 'Mapa Fin' in df_excel.columns:
+                for idx, url in enumerate(df_excel['Mapa Fin']):
+                    if pd.notna(url) and url != '':
+                        urls_fin[idx] = url
+                df_excel['Mapa Fin'] = df_excel['Mapa Fin'].apply(
+                    lambda x: '🗺️ Ver ubicación' if pd.notna(x) and x != '' else x
+                )
+            
+            # Escribir el DataFrame
+            df_excel.to_excel(writer, index=False, sheet_name=sheet[:31])
+            worksheet = writer.sheets[sheet[:31]]
+            
+            # Crear hipervínculos reales para las columnas de mapas
+            if urls_inicio or urls_fin:
+                # Encontrar las columnas de mapas
+                col_inicio = None
+                col_fin = None
+                
+                for col_idx, col_name in enumerate(df_excel.columns):
+                    if col_name == 'Mapa Inicio':
+                        col_inicio = col_idx
+                    elif col_name == 'Mapa Fin':
+                        col_fin = col_idx
+                
+                # Agregar hipervínculos para Mapa Inicio
+                if col_inicio is not None and urls_inicio:
+                    for row_idx, url in urls_inicio.items():
+                        cell_row = row_idx + 1  # +1 porque la fila 0 es el encabezado
+                        worksheet.write_url(cell_row, col_inicio, url, string='🗺️ Ver ubicación')
+                
+                # Agregar hipervínculos para Mapa Fin
+                if col_fin is not None and urls_fin:
+                    for row_idx, url in urls_fin.items():
+                        cell_row = row_idx + 1  # +1 porque la fila 0 es el encabezado
+                        worksheet.write_url(cell_row, col_fin, url, string='🗺️ Ver ubicación')
+    
     buf.seek(0)
     return buf.read()
 
@@ -503,13 +555,71 @@ with col_d2:
                     continue
                 g["Total horas"] = g["Dur_td"].apply(td_to_hhmmss)
                 g_out = g[["Semana","Año","Mes","Fecha","Usuario","Nombre","Apellidos","Hora inicio","Hora fin","Total horas","Distancia (m)","Mapa Inicio","Mapa Fin"]]
+                
+                # Guardar las URLs originales antes de modificar para Excel individual
+                urls_inicio_individual = {}
+                urls_fin_individual = {}
+                
+                if 'Mapa Inicio' in g_out.columns:
+                    for idx, url in enumerate(g_out['Mapa Inicio']):
+                        if pd.notna(url) and url != '':
+                            urls_inicio_individual[idx] = url
+                    g_out['Mapa Inicio'] = g_out['Mapa Inicio'].apply(
+                        lambda x: '🗺️ Ver ubicación' if pd.notna(x) and x != '' else x
+                    )
+                
+                if 'Mapa Fin' in g_out.columns:
+                    for idx, url in enumerate(g_out['Mapa Fin']):
+                        if pd.notna(url) and url != '':
+                            urls_fin_individual[idx] = url
+                    g_out['Mapa Fin'] = g_out['Mapa Fin'].apply(
+                        lambda x: '🗺️ Ver ubicación' if pd.notna(x) and x != '' else x
+                    )
+                
                 # subtotales por semana
                 subt_list = []
                 for semana, sg in g.groupby("Semana"):
                     tot_sec = int(sg["Dur_td"].dropna().dt.total_seconds().sum())
                     subt_list.append({"Usuario":u,"Semana":semana,"Subtotal":td_to_hhmmss(pd.Timedelta(seconds=tot_sec))})
                 subt_df = pd.DataFrame(subt_list)
-                xbytes = to_excel_bytes({"Resumen": g_out, "Subtotales semana": subt_df})
+                
+                # Crear Excel individual con hipervínculos reales
+                buf_individual = io.BytesIO()
+                with pd.ExcelWriter(buf_individual, engine="xlsxwriter") as writer:
+                    workbook_individual = writer.book
+                    
+                    # Escribir hojas
+                    g_out.to_excel(writer, index=False, sheet_name="Resumen")
+                    subt_df.to_excel(writer, index=False, sheet_name="Subtotales semana")
+                    
+                    # Agregar hipervínculos en la hoja Resumen
+                    worksheet_resumen = writer.sheets["Resumen"]
+                    
+                    if urls_inicio_individual or urls_fin_individual:
+                        # Encontrar las columnas de mapas
+                        col_inicio_ind = None
+                        col_fin_ind = None
+                        
+                        for col_idx, col_name in enumerate(g_out.columns):
+                            if col_name == 'Mapa Inicio':
+                                col_inicio_ind = col_idx
+                            elif col_name == 'Mapa Fin':
+                                col_fin_ind = col_idx
+                        
+                        # Agregar hipervínculos para Mapa Inicio
+                        if col_inicio_ind is not None and urls_inicio_individual:
+                            for row_idx, url in urls_inicio_individual.items():
+                                cell_row = row_idx + 1  # +1 porque la fila 0 es el encabezado
+                                worksheet_resumen.write_url(cell_row, col_inicio_ind, url, string='🗺️ Ver ubicación')
+                        
+                        # Agregar hipervínculos para Mapa Fin
+                        if col_fin_ind is not None and urls_fin_individual:
+                            for row_idx, url in urls_fin_individual.items():
+                                cell_row = row_idx + 1  # +1 porque la fila 0 es el encabezado
+                                worksheet_resumen.write_url(cell_row, col_fin_ind, url, string='🗺️ Ver ubicación')
+                
+                buf_individual.seek(0)
+                xbytes = buf_individual.read()
                 zf.writestr(f"{u.replace('@','_at_')}.xlsx", xbytes)
         zip_buf.seek(0)
         st.download_button(
